@@ -1,0 +1,98 @@
+from typing import Dict, List, Optional
+from config import config
+import json
+import os
+from datetime import datetime
+
+class DialogContext:
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        self.slots: Dict[str, str] = {}
+        self.message_history: List[Dict] = []
+        self.last_update = datetime.now()
+        self.context_file = f"contexts/{user_id}.json"
+        
+        # Создаем директорию для контекстов, если её нет
+        os.makedirs("contexts", exist_ok=True)
+        
+        # Загружаем существующий контекст, если есть
+        self.load_context()
+
+    def load_context(self):
+        """Загружает контекст из файла"""
+        if os.path.exists(self.context_file):
+            try:
+                with open(self.context_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.slots = data.get('slots', {})
+                    self.message_history = data.get('message_history', [])
+                    self.last_update = datetime.fromisoformat(data.get('last_update', datetime.now().isoformat()))
+            except Exception as e:
+                print(f"Error loading context: {str(e)}")
+
+    def save_context(self):
+        """Сохраняет контекст в файл"""
+        try:
+            with open(self.context_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'slots': self.slots,
+                    'message_history': self.message_history,
+                    'last_update': self.last_update.isoformat()
+                }, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Error saving context: {str(e)}")
+
+    def update_slot(self, slot_name: str, value: str):
+        """Обновляет значение слота"""
+        if slot_name in config.CONTEXT_SLOTS:
+            self.slots[slot_name] = value
+            self.last_update = datetime.now()
+            self.save_context()
+
+    def get_slot(self, slot_name: str) -> Optional[str]:
+        """Получает значение слота"""
+        return self.slots.get(slot_name)
+
+    def add_message(self, message: str, is_user: bool):
+        """Добавляет сообщение в историю"""
+        self.message_history.append({
+            'text': message,
+            'is_user': is_user,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        # Ограничиваем историю последними 5 сообщениями
+        if len(self.message_history) > 5:
+            self.message_history = self.message_history[-5:]
+        
+        self.last_update = datetime.now()
+        self.save_context()
+
+    def get_last_messages(self, limit: int = 5) -> List[Dict]:
+        """Получает последние сообщения"""
+        return self.message_history[-limit:]
+
+    def clear_context(self):
+        """Очищает контекст"""
+        self.slots = {}
+        self.message_history = []
+        self.last_update = datetime.now()
+        self.save_context()
+
+class ContextManager:
+    def __init__(self):
+        self.contexts: Dict[int, DialogContext] = {}
+
+    def get_context(self, user_id: int) -> DialogContext:
+        """Получает или создает контекст для пользователя"""
+        if user_id not in self.contexts:
+            self.contexts[user_id] = DialogContext(user_id)
+        return self.contexts[user_id]
+
+    def clear_context(self, user_id: int):
+        """Очищает контекст пользователя"""
+        if user_id in self.contexts:
+            self.contexts[user_id].clear_context()
+            del self.contexts[user_id]
+
+context_manager = ContextManager() 
